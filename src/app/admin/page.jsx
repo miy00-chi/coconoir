@@ -1,0 +1,250 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import Link from "next/link";
+import useAuth from "@/hooks/useAuth";
+import { toggleFeaturedProduct } from "@/utils/featured";
+import { formatCurrency, isEnabledFlag } from "@/utils/formatters";
+import { showToast } from "@/utils/notifications";
+
+const navLinkStyle = {
+  display: "inline-block",
+  padding: "10px 18px",
+  borderRadius: 999,
+  fontWeight: 700,
+  textDecoration: "none",
+};
+
+const sellerLinks = [
+  {
+    href: "/admin/orders",
+    label: "Manage Orders",
+    style: { ...navLinkStyle, backgroundColor: "#9b673e", color: "white" },
+  },
+  {
+    href: "/admin/inventory",
+    label: "Manage Inventory",
+    style: { ...navLinkStyle, backgroundColor: "#e9dfd6", color: "#3f2819" },
+  },
+  {
+    href: "/admin/reports",
+    label: "Reports",
+    style: { ...navLinkStyle, backgroundColor: "#e9dfd6", color: "#3f2819" },
+  },
+];
+
+export default function AdminPage() {
+  const { user } = useAuth();
+  const [products, setProducts] = useState([]);
+  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [toggleStates, setToggleStates] = useState({});
+
+  // Fetch all products for sellers
+  useEffect(() => {
+    if (user?.role === "Seller") {
+      fetchAllProducts();
+    }
+  }, [user]);
+
+  const fetchAllProducts = async () => {
+    try {
+      const res = await fetch("/api/seller/inventory");
+      const data = await res.json();
+      if (data.success && data.data) {
+        setProducts(data.data);
+      } else if (data.products) {
+        // Fallback for old format
+        setProducts(data.products);
+      }
+      // Initialize toggle states
+      const initialStates = {};
+      (data.data || data.products || []).forEach((p) => {
+        initialStates[p.id] = false;
+      });
+      setToggleStates(initialStates);
+    } catch (error) {
+      console.error("Error fetching products:", error);
+    } finally {
+      setLoadingProducts(false);
+    }
+  };
+
+  const handleToggleFeatured = async (productId, currentStatus) => {
+    setToggleStates((prev) => ({ ...prev, [productId]: true }));
+    try {
+      const nextStatus = !currentStatus;
+      const { ok, data } = await toggleFeaturedProduct(productId, nextStatus);
+      if (ok) {
+        setProducts((prev) =>
+          prev.map((p) =>
+            p.id === productId
+              ? {
+                  ...p,
+                  isHomepageFeatured: nextStatus,
+                }
+              : p
+          )
+        );
+
+        showToast({
+          title: !currentStatus ? "Featured" : "Removed from Featured",
+          message: !currentStatus
+            ? "Product featured on homepage"
+            : "Product removed from homepage",
+          type: "success",
+        });
+      } else {
+        showToast({
+          message: data.message || "Failed to update featured status",
+          type: "error",
+        });
+      }
+    } catch (error) {
+      console.error("Error toggling featured status:", error);
+      showToast({
+        message: "Failed to update featured status",
+        type: "error",
+      });
+    } finally {
+      setToggleStates((prev) => ({ ...prev, [productId]: false }));
+    }
+  };
+
+  if (user?.role !== "Seller") {
+    return (
+      <div style={{ padding: "40px", maxWidth: "1000px", margin: "0 auto" }}>
+        <h1>Access Denied</h1>
+        <p>This page is only available for sellers.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: "40px", maxWidth: "1000px", margin: "0 auto" }}>
+      {user?.role === "Seller" && (
+        <>
+          {sellerLinks.map((item) => (
+            <div key={item.href} style={{ marginBottom: 18 }}>
+              <Link href={item.href} style={item.style}>
+                {item.label}
+              </Link>
+            </div>
+          ))}
+          <h1>Seller - Manage Featured Products</h1>
+          <p>Toggle products to feature them on the homepage</p>
+
+          {loadingProducts ? (
+            <p>Loading your products...</p>
+          ) : products.length > 0 ? (
+            <div
+              style={{
+                marginTop: "30px",
+                overflowX: "auto",
+              }}
+            >
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  backgroundColor: "#fffdfb",
+                  borderRadius: "8px",
+                  overflow: "hidden",
+                }}
+              >
+                <thead>
+                  <tr style={{ backgroundColor: "#9b673e", color: "white" }}>
+                    <th style={{ padding: "12px", textAlign: "left" }}>
+                      Product Name
+                    </th>
+                    <th style={{ padding: "12px", textAlign: "left" }}>
+                      Price
+                    </th>
+                    <th style={{ padding: "12px", textAlign: "center" }}>
+                      Category
+                    </th>
+                    <th style={{ padding: "12px", textAlign: "center" }}>
+                      Featured on Homepage
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {products.map((product) => (
+                    <tr
+                      key={product.id}
+                      style={{
+                        borderBottom: "1px solid #ddd1c7",
+                        backgroundColor:
+                          product.isHomepageFeatured === 1
+                            ? "#f5ede3"
+                            : "white",
+                      }}
+                    >
+                      <td style={{ padding: "12px" }}>{product.name}</td>
+                      <td style={{ padding: "12px" }}>
+                        {formatCurrency(product.price)}
+                      </td>
+                      <td
+                        style={{
+                          padding: "12px",
+                          textAlign: "center",
+                          fontSize: "14px",
+                          color: "#8a6f5a",
+                        }}
+                      >
+                        {product.category}
+                      </td>
+                      <td style={{ padding: "12px", textAlign: "center" }}>
+                        <button
+                          onClick={() =>
+                            handleToggleFeatured(
+                              product.id,
+                              isEnabledFlag(product.isHomepageFeatured)
+                            )
+                          }
+                          disabled={toggleStates[product.id]}
+                          style={{
+                            padding: "8px 16px",
+                            fontSize: "14px",
+                            fontWeight: "600",
+                            backgroundColor:
+                              isEnabledFlag(product.isHomepageFeatured)
+                                ? "#9b673e"
+                                : "#f8f5f2",
+                            color:
+                              isEnabledFlag(product.isHomepageFeatured)
+                                ? "white"
+                                : "#9b673e",
+                            border:
+                              isEnabledFlag(product.isHomepageFeatured)
+                                ? "none"
+                                : "2px solid #9b673e",
+                            borderRadius: "6px",
+                            cursor: toggleStates[product.id]
+                              ? "not-allowed"
+                              : "pointer",
+                            transition: "all 0.3s",
+                            opacity: toggleStates[product.id] ? 0.6 : 1,
+                          }}
+                        >
+                          {toggleStates[product.id]
+                            ? "..."
+                            : isEnabledFlag(product.isHomepageFeatured)
+                            ? "⭐ Featured"
+                            : "☆ Not Featured"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p style={{ marginTop: "20px", color: "#8a6f5a" }}>
+              No products available. Add products using Manage Inventory.
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
